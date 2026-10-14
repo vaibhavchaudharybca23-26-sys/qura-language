@@ -14,7 +14,7 @@ pub struct FunctionLowerer<'a> {
     current_instructions: Vec<(Value, Instruction)>,
     current_is_terminated: bool,
     var_map: HashMap<String, (Value, Type, bool)>, // (Value, Type, is_mut)
-    _symbols: &'a SymbolTable,
+    symbols: &'a SymbolTable,
 }
 
 impl<'a> FunctionLowerer<'a> {
@@ -28,7 +28,7 @@ impl<'a> FunctionLowerer<'a> {
             current_instructions: Vec::new(),
             current_is_terminated: false,
             var_map: HashMap::new(),
-            _symbols: symbols,
+            symbols,
         }
     }
 
@@ -132,8 +132,13 @@ impl<'a> FunctionLowerer<'a> {
             } else if let Some(val) = tail_val {
                 self.terminate(Terminator::Return(Some(val)));
             } else {
-                // If unreachable fallthrough with non-unit return, emit zero/ret
-                let default_ret = self.emit(Instruction::ConstInt(0, return_type));
+                // If unreachable fallthrough with non-unit return, emit default constant/ret
+                let default_ret = match return_type {
+                    Type::Str => self.emit(Instruction::ConstStr(String::new())),
+                    Type::F64 => self.emit(Instruction::ConstFloat(0.0)),
+                    Type::Bool => self.emit(Instruction::ConstBool(false)),
+                    _ => self.emit(Instruction::ConstInt(0, return_type)),
+                };
                 self.terminate(Terminator::Return(Some(default_ret)));
             }
         }
@@ -298,9 +303,7 @@ impl<'a> FunctionLowerer<'a> {
                 syn::Literal::Int(v, _) => self.emit(Instruction::ConstInt(*v, Type::I32)),
                 syn::Literal::Float(v, _) => self.emit(Instruction::ConstFloat(*v)),
                 syn::Literal::Bool(v, _) => self.emit(Instruction::ConstBool(*v)),
-                syn::Literal::String(_, _) => {
-                    unimplemented!("string lowering in QIR is implemented in Step 3")
-                }
+                syn::Literal::String(s, _) => self.emit(Instruction::ConstStr(s.clone())),
             },
 
             syn::Expr::Variable(ident) => {
@@ -353,14 +356,28 @@ impl<'a> FunctionLowerer<'a> {
             syn::Expr::Grouping { expr, .. } => self.lower_expr(expr),
 
             syn::Expr::Call { callee, args, .. } => {
-                let mut arg_vals = Vec::new();
-                for a in args {
-                    arg_vals.push(self.lower_expr(a));
+                if self.symbols.lookup_function(&callee.name).is_none()
+                    && (callee.name == "print" || callee.name == "println")
+                {
+                    let arg_val = if let Some(first) = args.first() {
+                        self.lower_expr(first)
+                    } else {
+                        self.emit(Instruction::ConstInt(0, Type::Unit))
+                    };
+                    self.emit(Instruction::Print {
+                        val: arg_val,
+                        newline: callee.name == "println",
+                    })
+                } else {
+                    let mut arg_vals = Vec::new();
+                    for a in args {
+                        arg_vals.push(self.lower_expr(a));
+                    }
+                    self.emit(Instruction::Call {
+                        func: callee.name.clone(),
+                        args: arg_vals,
+                    })
                 }
-                self.emit(Instruction::Call {
-                    func: callee.name.clone(),
-                    args: arg_vals,
-                })
             }
 
             syn::Expr::Block(block) => {
@@ -488,6 +505,7 @@ impl<'a> FunctionLowerer<'a> {
                         Instruction::ConstInt(_, ty) => *ty,
                         Instruction::ConstFloat(_) => Type::F64,
                         Instruction::ConstBool(_) => Type::Bool,
+                        Instruction::ConstStr(_) => Type::Str,
                         Instruction::Binary { op, lhs, .. } => match op {
                             BinaryOp::Eq
                             | BinaryOp::Ne
@@ -503,7 +521,12 @@ impl<'a> FunctionLowerer<'a> {
                             UnaryOp::Not => Type::Bool,
                             UnaryOp::Neg => self.type_of_val(*val),
                         },
-                        Instruction::Call { .. } => Type::I32,
+                        Instruction::Call { func, .. } => self
+                            .symbols
+                            .lookup_function(func)
+                            .map(|s| Type::from(s.return_type.clone()))
+                            .unwrap_or(Type::I32),
+                        Instruction::Print { .. } => Type::Unit,
                     };
                 }
             }
@@ -521,6 +544,7 @@ impl<'a> FunctionLowerer<'a> {
                     Instruction::ConstInt(_, ty) => *ty,
                     Instruction::ConstFloat(_) => Type::F64,
                     Instruction::ConstBool(_) => Type::Bool,
+                    Instruction::ConstStr(_) => Type::Str,
                     Instruction::Binary { op, lhs, .. } => match op {
                         BinaryOp::Eq
                         | BinaryOp::Ne
@@ -536,7 +560,12 @@ impl<'a> FunctionLowerer<'a> {
                         UnaryOp::Not => Type::Bool,
                         UnaryOp::Neg => self.type_of_val(*val),
                     },
-                    Instruction::Call { .. } => Type::I32,
+                    Instruction::Call { func, .. } => self
+                        .symbols
+                        .lookup_function(func)
+                        .map(|s| Type::from(s.return_type.clone()))
+                        .unwrap_or(Type::I32),
+                    Instruction::Print { .. } => Type::Unit,
                 };
             }
         }

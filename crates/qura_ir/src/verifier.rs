@@ -197,7 +197,9 @@ impl<'a> Verifier<'a> {
                 UnaryOp::Not => Type::Bool,
                 UnaryOp::Neg => self.value_types.get(val).copied().unwrap_or(Type::I32),
             },
+            Instruction::ConstStr(_) => Type::Str,
             Instruction::Call { .. } => Type::I32,
+            Instruction::Print { .. } => Type::Unit,
         }
     }
 
@@ -330,7 +332,8 @@ impl<'a> Verifier<'a> {
         match inst {
             Instruction::ConstInt(_, _)
             | Instruction::ConstFloat(_)
-            | Instruction::ConstBool(_) => {}
+            | Instruction::ConstBool(_)
+            | Instruction::ConstStr(_) => {}
 
             Instruction::Binary { op, lhs, rhs } => {
                 self.check_dominance(*lhs, block_id, inst_idx);
@@ -348,21 +351,31 @@ impl<'a> Verifier<'a> {
                                 r_ty
                             ),
                         });
+                    } else if *l_ty == Type::Str {
+                        self.errors.push(QirVerificationError {
+                            function: self.func.name.clone(),
+                            block: Some(block_id),
+                            message: format!("binary '{}' does not support operand type str", op.as_str()),
+                        });
                     }
                 }
             }
 
             Instruction::Unary { op, val } => {
                 self.check_dominance(*val, block_id, inst_idx);
-                if *op == UnaryOp::Not {
-                    if let Some(val_ty) = self.value_types.get(val) {
-                        if *val_ty != Type::Bool {
-                            self.errors.push(QirVerificationError {
-                                function: self.func.name.clone(),
-                                block: Some(block_id),
-                                message: format!("unary 'not' expects bool operand, found {}", val_ty),
-                            });
-                        }
+                if let Some(val_ty) = self.value_types.get(val) {
+                    if *val_ty == Type::Str {
+                        self.errors.push(QirVerificationError {
+                            function: self.func.name.clone(),
+                            block: Some(block_id),
+                            message: format!("unary '{}' does not support operand type str", op.as_str()),
+                        });
+                    } else if *op == UnaryOp::Not && *val_ty != Type::Bool {
+                        self.errors.push(QirVerificationError {
+                            function: self.func.name.clone(),
+                            block: Some(block_id),
+                            message: format!("unary 'not' expects bool operand, found {}", val_ty),
+                        });
                     }
                 }
             }
@@ -370,6 +383,22 @@ impl<'a> Verifier<'a> {
             Instruction::Call { args, .. } => {
                 for arg in args {
                     self.check_dominance(*arg, block_id, inst_idx);
+                }
+            }
+
+            Instruction::Print { val, .. } => {
+                self.check_dominance(*val, block_id, inst_idx);
+                if let Some(val_ty) = self.value_types.get(val) {
+                    if !val_ty.is_printable() {
+                        self.errors.push(QirVerificationError {
+                            function: self.func.name.clone(),
+                            block: Some(block_id),
+                            message: format!(
+                                "print operand must be a printable type (str, i32, i64, u32, u64, bool), found {}",
+                                val_ty
+                            ),
+                        });
+                    }
                 }
             }
         }

@@ -54,6 +54,7 @@ pub fn map_type(ty: Type) -> types::Type {
         Type::U64 => types::I64,
         Type::F64 => types::F64,
         Type::Bool => types::I8,
+        Type::Str => types::I64,
         Type::Unit => panic!("Unit type does not map to a Cranelift register type"),
     }
 }
@@ -119,6 +120,7 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
                     Instruction::ConstInt(_, ty) => *ty,
                     Instruction::ConstFloat(_) => Type::F64,
                     Instruction::ConstBool(_) => Type::Bool,
+                    Instruction::ConstStr(_) => Type::Str,
                     Instruction::Binary { op, lhs, .. } => match op {
                         BinaryOp::Eq
                         | BinaryOp::Ne
@@ -137,6 +139,7 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
                     Instruction::Call { func: target_name, .. } => {
                         func_return_types.get(target_name).copied().unwrap_or(Type::I32)
                     }
+                    Instruction::Print { .. } => Type::Unit,
                 };
                 value_types.insert(*def_val, ty);
             }
@@ -298,6 +301,16 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
                         } else {
                             results[0]
                         }
+                    }
+                    Instruction::ConstStr(_) => {
+                        return Err(CodegenError::UnsupportedOperation(
+                            "native code generation for string constants is scheduled for Milestone 6 Step 4".to_string(),
+                        ));
+                    }
+                    Instruction::Print { .. } => {
+                        return Err(CodegenError::UnsupportedOperation(
+                            "native code generation for print/println is scheduled for Milestone 6 Step 4".to_string(),
+                        ));
                     }
                 };
 

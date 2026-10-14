@@ -9,7 +9,18 @@ pub enum Type {
     U64,
     F64,
     Bool,
+    Str,
     Unit,
+}
+
+impl Type {
+    #[inline]
+    pub fn is_printable(&self) -> bool {
+        matches!(
+            self,
+            Type::Str | Type::I32 | Type::I64 | Type::U32 | Type::U64 | Type::Bool
+        )
+    }
 }
 
 impl fmt::Display for Type {
@@ -21,6 +32,7 @@ impl fmt::Display for Type {
             Type::U64 => write!(f, "u64"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::Str => write!(f, "str"),
             Type::Unit => write!(f, "()"),
         }
     }
@@ -35,8 +47,8 @@ impl From<qura_sema::Type> for Type {
             qura_sema::Type::U64 => Type::U64,
             qura_sema::Type::F64 => Type::F64,
             qura_sema::Type::Bool => Type::Bool,
+            qura_sema::Type::Str => Type::Str,
             qura_sema::Type::Unit => Type::Unit,
-            qura_sema::Type::Str => unimplemented!("QIR lowering for Type::Str is in Step 3"),
             qura_sema::Type::Error => panic!("cannot convert error type to QIR type"),
         }
     }
@@ -119,9 +131,11 @@ pub enum Instruction {
     ConstInt(i64, Type),
     ConstFloat(f64),
     ConstBool(bool),
+    ConstStr(String),
     Binary { op: BinaryOp, lhs: Value, rhs: Value },
     Unary { op: UnaryOp, val: Value },
     Call { func: String, args: Vec<Value> },
+    Print { val: Value, newline: bool },
 }
 
 impl fmt::Display for Instruction {
@@ -130,6 +144,7 @@ impl fmt::Display for Instruction {
             Instruction::ConstInt(val, ty) => write!(f, "iconst.{} {}", ty, val),
             Instruction::ConstFloat(val) => write!(f, "fconst.f64 {}", val),
             Instruction::ConstBool(val) => write!(f, "bconst.bool {}", val),
+            Instruction::ConstStr(val) => write!(f, "sconst.str {:?}", val),
             Instruction::Binary { op, lhs, rhs } => {
                 write!(f, "{} {}, {}", op.as_str(), lhs, rhs)
             }
@@ -144,6 +159,8 @@ impl fmt::Display for Instruction {
                 }
                 write!(f, ")")
             }
+            Instruction::Print { val, newline: false } => write!(f, "print {}", val),
+            Instruction::Print { val, newline: true } => write!(f, "println {}", val),
         }
     }
 }

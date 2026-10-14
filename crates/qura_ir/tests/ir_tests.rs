@@ -494,3 +494,251 @@ fn test_verifier_rejects_binary_operand_type_mismatch() {
     let errs = verify_module(&module).expect_err("Expected verifier error for mismatched binary operand types");
     assert!(errs.iter().any(|e| e.message.contains("binary 'add' operand type mismatch")));
 }
+
+#[test]
+fn test_qir_lowering_string_constant() {
+    let src = "
+    fn test_strings() {
+        let a = \"hello\";
+        let b: str = \"world\\n\";
+    }
+    ";
+    let module = lower_and_verify(src);
+    let func = &module.functions[0];
+    let entry = &func.blocks[0];
+
+    let has_hello = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::ConstStr(s) if s == "hello")
+    });
+    let has_world = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::ConstStr(s) if s == "world\n")
+    });
+
+    assert!(has_hello, "Expected ConstStr(\"hello\") in QIR");
+    assert!(has_world, "Expected ConstStr(\"world\\n\") in QIR");
+}
+
+#[test]
+fn test_qir_lowering_print_and_println() {
+    let src = "
+    fn main() {
+        print(\"hello\");
+        println(\"world\");
+    }
+    ";
+    let module = lower_and_verify(src);
+    let func = &module.functions[0];
+    let entry = &func.blocks[0];
+
+    let has_print = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Print { newline: false, .. })
+    });
+    let has_println = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Print { newline: true, .. })
+    });
+
+    assert!(has_print, "Expected Print {{ newline: false }} in QIR");
+    assert!(has_println, "Expected Print {{ newline: true }} in QIR");
+}
+
+#[test]
+fn test_qir_lowering_print_all_printable_types() {
+    let src = "
+    fn main() {
+        print(\"string\");
+        println(42);
+        let a: i64 = 100;
+        print(a);
+        let b: u32 = 200;
+        println(b);
+        let c: u64 = 300;
+        print(c);
+        println(true);
+        print(false);
+    }
+    ";
+    let module = lower_and_verify(src);
+    let func = &module.functions[0];
+    let entry = &func.blocks[0];
+
+    let print_count = entry.instructions.iter().filter(|(_, inst)| {
+        matches!(inst, Instruction::Print { .. })
+    }).count();
+
+    assert_eq!(print_count, 7, "Expected 7 Print instructions in QIR");
+}
+
+#[test]
+fn test_qir_user_function_named_print_lowers_to_call() {
+    let src = "
+    fn print(x: i32) -> i32 {
+        return x * 2;
+    }
+
+    fn main() -> i32 {
+        return print(21);
+    }
+    ";
+    let module = lower_and_verify(src);
+    let main_func = module.functions.iter().find(|f| f.name == "main").unwrap();
+    let entry = &main_func.blocks[0];
+
+    let has_call = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Call { func, .. } if func == "print")
+    });
+    let has_builtin_print = entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Print { .. })
+    });
+
+    assert!(has_call, "Expected user function 'print' to lower to Instruction::Call");
+    assert!(!has_builtin_print, "User function 'print' must not lower to Instruction::Print");
+}
+
+#[test]
+fn test_qir_str_parameter_and_return() {
+    let src = "
+    fn echo(s: str) -> str {
+        return s;
+    }
+
+    fn main() {
+        let msg = echo(\"test\");
+        println(msg);
+    }
+    ";
+    let module = lower_and_verify(src);
+    let echo_func = module.functions.iter().find(|f| f.name == "echo").unwrap();
+    assert_eq!(echo_func.return_type, Type::Str);
+    assert_eq!(echo_func.params[0].1, Type::Str);
+}
+
+#[test]
+fn test_verifier_rejects_print_unprintable_type_f64() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "bad_print_f64".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                (Value(0), Instruction::ConstFloat(3.14)),
+                (Value(1), Instruction::Print { val: Value(0), newline: true }),
+            ],
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for printing f64");
+    assert!(errs.iter().any(|e| e.message.contains("print operand must be a printable type")));
+}
+
+#[test]
+fn test_verifier_rejects_print_unprintable_type_unit() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "bad_print_unit".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                (Value(0), Instruction::ConstInt(0, Type::Unit)),
+                (Value(1), Instruction::Print { val: Value(0), newline: false }),
+            ],
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for printing ()");
+    assert!(errs.iter().any(|e| e.message.contains("print operand must be a printable type")));
+}
+
+#[test]
+fn test_verifier_rejects_binary_op_on_str() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "bad_str_binary".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                (Value(0), Instruction::ConstStr("a".to_string())),
+                (Value(1), Instruction::ConstStr("b".to_string())),
+                (
+                    Value(2),
+                    Instruction::Binary {
+                        op: qura_ir::BinaryOp::Add,
+                        lhs: Value(0),
+                        rhs: Value(1),
+                    },
+                ),
+            ],
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for binary op on str");
+    assert!(errs.iter().any(|e| e.message.contains("binary 'add' does not support operand type str")));
+}
+
+#[test]
+fn test_verifier_rejects_unary_op_on_str() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "bad_str_unary".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                (Value(0), Instruction::ConstStr("a".to_string())),
+                (
+                    Value(1),
+                    Instruction::Unary {
+                        op: qura_ir::UnaryOp::Not,
+                        val: Value(0),
+                    },
+                ),
+            ],
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for unary op on str");
+    assert!(errs.iter().any(|e| e.message.contains("unary 'not' does not support operand type str")));
+}
+
+#[test]
+fn test_verifier_rejects_print_use_before_def() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "print_use_before_def".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                // Use Value(1) before Value(1) is defined
+                (Value(0), Instruction::Print { val: Value(1), newline: true }),
+                (Value(1), Instruction::ConstStr("hello".to_string())),
+            ],
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for use before def");
+    assert!(errs.iter().any(|e| e.message.contains("used before its definition")));
+}
+

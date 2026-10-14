@@ -1,0 +1,12 @@
+[package]
+name = "qura_parser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+qura_syntax = { path = "../qura_syntax" }
+qura_diagnostics = { path = "../qura_diagnostics" }
+
+[dev-dependencies]

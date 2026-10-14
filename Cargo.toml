@@ -5,6 +5,7 @@ members = [
     "crates/qura_diagnostics",
     "crates/qura_parser",
     "crates/qura_ir",
+    "crates/qura_sema",
 ]
 
 [workspace.package]

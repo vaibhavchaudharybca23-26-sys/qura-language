@@ -1,0 +1,22 @@
+// Qura Language — Collatz Conjecture Example
+// Computes the number of steps to reach 1 starting from n = 27.
+// Expected process exit code: 111.
+
+fn collatz_steps(mut n: i32) -> i32 {
+    let mut steps = 0;
+    while n > 1 {
+        let is_even = n % 2 == 0;
+        if is_even {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    return steps;
+}
+
+fn main() -> i32 {
+    let total_steps = collatz_steps(27); // 111 steps
+    return total_steps;
+}

@@ -1,0 +1,18 @@
+// Qura Language — Factorial Example
+// Computes factorial(5) using an iterative while loop and mutable state.
+// Expected process exit code: 120.
+
+fn factorial(n: i32) -> i32 {
+    let mut acc = 1;
+    let mut i = 1;
+    while i <= n {
+        acc = acc * i;
+        i = i + 1;
+    }
+    return acc;
+}
+
+fn main() -> i32 {
+    let answer = factorial(5); // 5! = 120
+    return answer;
+}

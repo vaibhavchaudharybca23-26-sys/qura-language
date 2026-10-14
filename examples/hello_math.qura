@@ -1,0 +1,12 @@
+// Qura Language — Hello Math Example
+// Computes an arithmetic expression and returns the result as process exit code (42).
+
+fn calculate(base: i32, multiplier: i32, offset: i32) -> i32 {
+    let product = base * multiplier;
+    return product + offset;
+}
+
+fn main() -> i32 {
+    let result = calculate(10, 4, 2); // 10 * 4 + 2 = 42
+    return result;
+}

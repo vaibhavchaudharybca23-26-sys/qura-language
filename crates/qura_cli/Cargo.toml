@@ -1,0 +1,18 @@
+[package]
+name = "qura_cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "qura"
+path = "src/main.rs"
+
+[dependencies]
+qura_syntax = { path = "../qura_syntax" }
+qura_diagnostics = { path = "../qura_diagnostics" }
+qura_parser = { path = "../qura_parser" }
+qura_sema = { path = "../qura_sema" }
+qura_ir = { path = "../qura_ir" }
+qura_codegen_cranelift = { path = "../qura_codegen_cranelift" }

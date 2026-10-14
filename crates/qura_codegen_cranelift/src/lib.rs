@@ -1,5 +1,6 @@
 pub mod codegen;
 pub mod linker;
+pub mod runtime;
 
 pub use codegen::{compile_module, map_type, CodegenError};
 pub use linker::{find_msvc_linker, find_windows_sdk_lib, link_executable, LinkerError};

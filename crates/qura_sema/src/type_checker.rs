@@ -375,7 +375,7 @@ impl TypeChecker {
             },
 
             Expr::Unary { op, operand, span } => {
-                let inner_ty = self.check_expr(operand, None);
+                let inner_ty = self.check_expr(operand, expected_type);
                 if inner_ty == Type::Error {
                     return Type::Error;
                 }

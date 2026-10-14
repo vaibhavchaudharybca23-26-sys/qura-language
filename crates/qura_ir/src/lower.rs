@@ -14,6 +14,7 @@ pub struct FunctionLowerer<'a> {
     current_instructions: Vec<(Value, Instruction)>,
     current_is_terminated: bool,
     var_map: HashMap<String, (Value, Type, bool)>, // (Value, Type, is_mut)
+    current_return_type: Type,
     symbols: &'a SymbolTable,
 }
 
@@ -28,6 +29,7 @@ impl<'a> FunctionLowerer<'a> {
             current_instructions: Vec::new(),
             current_is_terminated: false,
             var_map: HashMap::new(),
+            current_return_type: Type::Unit,
             symbols,
         }
     }
@@ -122,6 +124,8 @@ impl<'a> FunctionLowerer<'a> {
                 .insert(p.name.name.clone(), (val, ir_ty, p.is_mut));
         }
 
+        self.current_return_type = return_type;
+
         // Lower body statements
         let tail_val = self.lower_block(&func.body);
 
@@ -164,7 +168,7 @@ impl<'a> FunctionLowerer<'a> {
 
         let tail_val = if !self.is_current_terminated() {
             if let Some(ref tail_expr) = block.tail_expr {
-                Some(self.lower_expr(tail_expr))
+                Some(self.lower_expr(tail_expr, None))
             } else {
                 None
             }
@@ -191,21 +195,23 @@ impl<'a> FunctionLowerer<'a> {
                 init,
                 ..
             } => {
-                let init_val = self.lower_expr(init);
                 let ir_ty = if let Some(t_expr) = ty {
                     let sema_ty = qura_sema::Type::from_type_expr(t_expr)
                         .unwrap_or(qura_sema::Type::I32);
-                    Type::from(sema_ty)
+                    Some(Type::from(sema_ty))
                 } else {
-                    self.type_of_val(init_val)
+                    None
                 };
+                let init_val = self.lower_expr(init, ir_ty);
+                let final_ty = ir_ty.unwrap_or_else(|| self.type_of_val(init_val));
 
                 self.var_map
-                    .insert(name.name.clone(), (init_val, ir_ty, *is_mut));
+                    .insert(name.name.clone(), (init_val, final_ty, *is_mut));
             }
 
             syn::Stmt::Assign { target, value, .. } => {
-                let new_val = self.lower_expr(value);
+                let expected = self.var_map.get(&target.name).map(|(_, ty, _)| *ty);
+                let new_val = self.lower_expr(value, expected);
                 if let Some((val_slot, _, _)) = self.var_map.get_mut(&target.name) {
                     *val_slot = new_val;
                 }
@@ -241,7 +247,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.start_block(header_id, header_params);
 
                 // Check condition
-                let cond_val = self.lower_expr(condition);
+                let cond_val = self.lower_expr(condition, Some(Type::Bool));
 
                 // Exit args carry the current loop parameter values
                 let exit_args: Vec<Value> = active_muts
@@ -284,7 +290,7 @@ impl<'a> FunctionLowerer<'a> {
 
             syn::Stmt::Return { value, .. } => {
                 if let Some(expr) = value {
-                    let val = self.lower_expr(expr);
+                    let val = self.lower_expr(expr, Some(self.current_return_type));
                     self.terminate(Terminator::Return(Some(val)));
                 } else {
                     self.terminate(Terminator::Return(None));
@@ -292,15 +298,18 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             syn::Stmt::Expr { expr, .. } => {
-                self.lower_expr(expr);
+                self.lower_expr(expr, None);
             }
         }
     }
 
-    fn lower_expr(&mut self, expr: &syn::Expr) -> Value {
+    fn lower_expr(&mut self, expr: &syn::Expr, expected_type: Option<Type>) -> Value {
         match expr {
             syn::Expr::Literal(lit) => match lit {
-                syn::Literal::Int(v, _) => self.emit(Instruction::ConstInt(*v, Type::I32)),
+                syn::Literal::Int(v, _) => {
+                    let int_ty = expected_type.filter(|t| t.is_integer()).unwrap_or(Type::I32);
+                    self.emit(Instruction::ConstInt(*v, int_ty))
+                }
                 syn::Literal::Float(v, _) => self.emit(Instruction::ConstFloat(*v)),
                 syn::Literal::Bool(v, _) => self.emit(Instruction::ConstBool(*v)),
                 syn::Literal::String(s, _) => self.emit(Instruction::ConstStr(s.clone())),
@@ -315,7 +324,7 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             syn::Expr::Unary { op, operand, .. } => {
-                let inner = self.lower_expr(operand);
+                let inner = self.lower_expr(operand, expected_type);
                 let ir_op = match op {
                     syn::UnaryOp::Neg => UnaryOp::Neg,
                     syn::UnaryOp::Not => UnaryOp::Not,
@@ -329,8 +338,6 @@ impl<'a> FunctionLowerer<'a> {
             syn::Expr::Binary {
                 op, left, right, ..
             } => {
-                let l_val = self.lower_expr(left);
-                let r_val = self.lower_expr(right);
                 let ir_op = match op {
                     syn::BinaryOp::Add => BinaryOp::Add,
                     syn::BinaryOp::Sub => BinaryOp::Sub,
@@ -346,6 +353,13 @@ impl<'a> FunctionLowerer<'a> {
                     syn::BinaryOp::And => BinaryOp::And,
                     syn::BinaryOp::Or => BinaryOp::Or,
                 };
+                let is_arith = matches!(
+                    ir_op,
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem
+                );
+                let l_val = self.lower_expr(left, if is_arith { expected_type } else { None });
+                let l_ty = self.type_of_val(l_val);
+                let r_val = self.lower_expr(right, if is_arith { Some(l_ty) } else { None });
                 self.emit(Instruction::Binary {
                     op: ir_op,
                     lhs: l_val,
@@ -353,14 +367,14 @@ impl<'a> FunctionLowerer<'a> {
                 })
             }
 
-            syn::Expr::Grouping { expr, .. } => self.lower_expr(expr),
+            syn::Expr::Grouping { expr, .. } => self.lower_expr(expr, expected_type),
 
             syn::Expr::Call { callee, args, .. } => {
                 if self.symbols.lookup_function(&callee.name).is_none()
                     && (callee.name == "print" || callee.name == "println")
                 {
                     let arg_val = if let Some(first) = args.first() {
-                        self.lower_expr(first)
+                        self.lower_expr(first, None)
                     } else {
                         self.emit(Instruction::ConstInt(0, Type::Unit))
                     };
@@ -369,9 +383,14 @@ impl<'a> FunctionLowerer<'a> {
                         newline: callee.name == "println",
                     })
                 } else {
+                    let fn_sym = self.symbols.lookup_function(&callee.name).cloned();
                     let mut arg_vals = Vec::new();
-                    for a in args {
-                        arg_vals.push(self.lower_expr(a));
+                    for (idx, a) in args.iter().enumerate() {
+                        let p_ty = fn_sym
+                            .as_ref()
+                            .and_then(|s| s.params.get(idx))
+                            .map(|(_, t, _)| Type::from(t.clone()));
+                        arg_vals.push(self.lower_expr(a, p_ty));
                     }
                     self.emit(Instruction::Call {
                         func: callee.name.clone(),
@@ -390,7 +409,7 @@ impl<'a> FunctionLowerer<'a> {
                 then_branch,
                 else_branch,
                 ..
-            } => self.lower_if_expr(condition, then_branch, else_branch.as_ref()),
+            } => self.lower_if_expr(condition, then_branch, else_branch.as_ref(), expected_type),
         }
     }
 
@@ -399,9 +418,10 @@ impl<'a> FunctionLowerer<'a> {
         condition: &syn::Expr,
         then_branch: &syn::Block,
         else_branch: Option<&syn::Block>,
+        _expected_type: Option<Type>,
     ) -> Value {
         let active_muts = self.get_active_mut_vars();
-        let cond_val = self.lower_expr(condition);
+        let cond_val = self.lower_expr(condition, Some(Type::Bool));
 
         let then_id = self.alloc_block_id();
         let else_id = self.alloc_block_id();

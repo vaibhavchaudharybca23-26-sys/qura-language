@@ -289,3 +289,25 @@ fn test_cli_run_compiler_error_distinction() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cannot find variable") || stderr.contains("E0103"));
 }
+
+#[test]
+fn test_cli_run_print_hello_world() {
+    let qura = get_qura_bin();
+    let src = "
+    fn main() {
+        println(\"Hello from Qura CLI!\");
+    }
+    ";
+    let (_dir, file) = create_temp_qura_file("run_print_hello", src);
+
+    let output = Command::new(&qura)
+        .arg("run")
+        .arg(&file)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "Hello from Qura CLI!\r\n");
+}
+

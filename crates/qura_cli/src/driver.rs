@@ -5,7 +5,7 @@ use qura_parser::parse_source;
 use qura_sema::analyze;
 use qura_syntax::SourceFile;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -138,6 +138,8 @@ impl Driver {
 
         match run_result {
             Ok(output) => {
+                let _ = io::stdout().write_all(&output.stdout);
+                let _ = io::stderr().write_all(&output.stderr);
                 // Propagate actual exit code
                 let code = output.status.code().unwrap_or(-1);
                 Ok(code)

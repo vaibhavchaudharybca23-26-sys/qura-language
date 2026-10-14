@@ -21,6 +21,11 @@ impl Type {
             Type::Str | Type::I32 | Type::I64 | Type::U32 | Type::U64 | Type::Bool
         )
     }
+
+    #[inline]
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Type::I32 | Type::I64 | Type::U32 | Type::U64)
+    }
 }
 
 impl fmt::Display for Type {

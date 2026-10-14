@@ -10,7 +10,7 @@ fn lower_and_verify(src: &str) -> Module {
     compile_and_verify(&program, &symbols).expect("QIR lowering or verification failed")
 }
 
-fn compile_to_exe_and_run(src: &str, test_name: &str) -> i32 {
+fn compile_to_exe_and_run_with_output(src: &str, test_name: &str) -> (i32, String) {
     let module = lower_and_verify(src);
     verify_module(&module).expect("QIR verification must succeed");
 
@@ -25,7 +25,13 @@ fn compile_to_exe_and_run(src: &str, test_name: &str) -> i32 {
         .output()
         .expect("Failed to execute native binary");
 
-    output.status.code().expect("Process must exit with a code")
+    let exit_code = output.status.code().expect("Process must exit with a code");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    (exit_code, stdout)
+}
+
+fn compile_to_exe_and_run(src: &str, test_name: &str) -> i32 {
+    compile_to_exe_and_run_with_output(src, test_name).0
 }
 
 #[test]
@@ -208,3 +214,114 @@ fn test_codegen_separate_object_and_link_stages() {
     let output = Command::new(&exe_path).output().expect("Execute");
     assert_eq!(output.status.code(), Some(7));
 }
+
+#[test]
+fn test_codegen_println_hello_world() {
+    let src = "
+    fn main() {
+        println(\"Hello from Qura!\");
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "println_hello_world");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Hello from Qura!\r\n");
+}
+
+#[test]
+fn test_codegen_print_and_println() {
+    let src = "
+    fn main() {
+        print(\"Hello, \");
+        println(\"World!\");
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "print_and_println");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Hello, World!\r\n");
+}
+
+#[test]
+fn test_codegen_string_escapes_and_empty() {
+    let src = "
+    fn main() {
+        println(\"\");
+        println(\"Line1\\nLine2\\tTabbed \\\"Quotes\\\" \\\\Backslash\\\\\");
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "string_escapes_and_empty");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "\r\nLine1\nLine2\tTabbed \"Quotes\" \\Backslash\\\r\n");
+}
+
+#[test]
+fn test_codegen_print_integers_signed_and_unsigned() {
+    let src = "
+    fn main() {
+        let a: i32 = 0;
+        let b: i32 = 42;
+        let c: i32 = -100;
+        let d: i64 = -9223372036854775807;
+        let u: u32 = 4000000000;
+        let mut u64_val: u64 = 9223372036854775807;
+        u64_val = u64_val * 2 + 1;
+
+        println(a);
+        println(b);
+        println(c);
+        println(d);
+        println(u);
+        println(u64_val);
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "print_integers_signed_and_unsigned");
+    assert_eq!(code, 0);
+    let expected = "0\r\n42\r\n-100\r\n-9223372036854775807\r\n4000000000\r\n18446744073709551615\r\n";
+    assert_eq!(stdout, expected);
+}
+
+#[test]
+fn test_codegen_print_booleans() {
+    let src = "
+    fn main() {
+        print(true);
+        print(\" and \");
+        println(false);
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "print_booleans");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true and false\r\n");
+}
+
+#[test]
+fn test_codegen_print_in_loops_and_exit_code() {
+    let src = "
+    fn main() -> i32 {
+        let mut i = 1;
+        while i <= 3 {
+            print(\"Step \");
+            println(i);
+            i = i + 1;
+        }
+        return 77;
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "print_in_loops_and_exit_code");
+    assert_eq!(code, 77);
+    assert_eq!(stdout, "Step 1\r\nStep 2\r\nStep 3\r\n");
+}
+
+#[test]
+fn test_codegen_print_i64_min() {
+    let src = "
+    fn main() {
+        let mut min_val: i64 = -9223372036854775807;
+        min_val = min_val - 1;
+        println(min_val);
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "print_i64_min");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "-9223372036854775808\r\n");
+}
+

@@ -3,13 +3,14 @@ use cranelift_codegen::ir::{types, AbiParam, BlockArg, Function, InstBuilder, Us
 use cranelift_codegen::isa;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{default_libcall_names, FuncId, Linkage, Module as _};
+use cranelift_module::{default_libcall_names, DataDescription, DataId, FuncId, Linkage, Module as _};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use qura_ir::ir::{BinaryOp, BlockId, Instruction, Module, Terminator, Type, UnaryOp, Value};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 use target_lexicon::Triple;
+use crate::runtime;
 
 #[derive(Debug)]
 pub enum CodegenError {
@@ -84,6 +85,34 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
         func_return_types.insert(func.name.clone(), func.return_type);
     }
 
+    // Step 0: Declare and define static string constants
+    let mut str_data_ids: HashMap<String, DataId> = HashMap::new();
+    let mut str_counter = 0usize;
+    for func in &module.functions {
+        for block in &func.blocks {
+            for (_, inst) in &block.instructions {
+                if let Instruction::ConstStr(s) = inst {
+                    if !str_data_ids.contains_key(s) {
+                        let mut desc = DataDescription::new();
+                        let mut bytes = s.as_bytes().to_vec();
+                        bytes.push(0); // Null terminator
+                        desc.define(bytes.into_boxed_slice());
+                        let name = format!("__qura_str_{}", str_counter);
+                        str_counter += 1;
+                        let data_id = cl_module.declare_data(&name, Linkage::Local, false, false)?;
+                        cl_module.define_data(data_id, &desc)?;
+                        str_data_ids.insert(s.clone(), data_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Initialize Cranelift function builder context and runtime routines
+    let mut ctx = cl_module.make_context();
+    let mut fn_builder_ctx = FunctionBuilderContext::new();
+    let rt = runtime::init_runtime(&mut cl_module, &mut ctx, &mut fn_builder_ctx)?;
+
     // Step 1: Declare all functions in the module
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     for func in &module.functions {
@@ -91,7 +120,9 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
         for (_, p_ty) in &func.params {
             sig.params.push(AbiParam::new(map_type(*p_ty)));
         }
-        if func.return_type != Type::Unit {
+        if func.name == "main" && func.return_type == Type::Unit {
+            sig.returns.push(AbiParam::new(types::I32));
+        } else if func.return_type != Type::Unit {
             sig.returns.push(AbiParam::new(map_type(func.return_type)));
         }
 
@@ -100,9 +131,6 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
     }
 
     // Step 2: Define each function body
-    let mut ctx = cl_module.make_context();
-    let mut fn_builder_ctx = FunctionBuilderContext::new();
-
     for func in &module.functions {
         let func_id = func_ids[&func.name];
 
@@ -150,7 +178,9 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
         for (_, p_ty) in &func.params {
             sig.params.push(AbiParam::new(map_type(*p_ty)));
         }
-        if func.return_type != Type::Unit {
+        if func.name == "main" && func.return_type == Type::Unit {
+            sig.returns.push(AbiParam::new(types::I32));
+        } else if func.return_type != Type::Unit {
             sig.returns.push(AbiParam::new(map_type(func.return_type)));
         }
         ctx.func = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
@@ -302,15 +332,51 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
                             results[0]
                         }
                     }
-                    Instruction::ConstStr(_) => {
-                        return Err(CodegenError::UnsupportedOperation(
-                            "native code generation for string constants is scheduled for Milestone 6 Step 4".to_string(),
-                        ));
+                    Instruction::ConstStr(s) => {
+                        let data_id = *str_data_ids.get(s).ok_or_else(|| {
+                            CodegenError::UnsupportedOperation(format!("unregistered string literal {:?}", s))
+                        })?;
+                        let local_data = cl_module.declare_data_in_func(data_id, &mut builder.func);
+                        builder.ins().symbol_value(types::I64, local_data)
                     }
-                    Instruction::Print { .. } => {
-                        return Err(CodegenError::UnsupportedOperation(
-                            "native code generation for print/println is scheduled for Milestone 6 Step 4".to_string(),
-                        ));
+                    Instruction::Print { val, newline } => {
+                        let cl_val = *val_map.get(val).ok_or(CodegenError::UndefinedValue(*val))?;
+                        let val_ty = *value_types.get(val).ok_or(CodegenError::UndefinedValue(*val))?;
+                        let nl_val = builder.ins().iconst(types::I32, if *newline { 1 } else { 0 });
+
+                        match val_ty {
+                            Type::Str => {
+                                let local_callee = cl_module.declare_func_in_func(rt.print_str_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[cl_val, nl_val]);
+                            }
+                            Type::I32 => {
+                                let val64 = builder.ins().sextend(types::I64, cl_val);
+                                let local_callee = cl_module.declare_func_in_func(rt.print_i64_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[val64, nl_val]);
+                            }
+                            Type::I64 => {
+                                let local_callee = cl_module.declare_func_in_func(rt.print_i64_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[cl_val, nl_val]);
+                            }
+                            Type::U32 => {
+                                let val64 = builder.ins().uextend(types::I64, cl_val);
+                                let local_callee = cl_module.declare_func_in_func(rt.print_u64_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[val64, nl_val]);
+                            }
+                            Type::U64 => {
+                                let local_callee = cl_module.declare_func_in_func(rt.print_u64_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[cl_val, nl_val]);
+                            }
+                            Type::Bool => {
+                                let local_callee = cl_module.declare_func_in_func(rt.print_bool_id, &mut builder.func);
+                                builder.ins().call(local_callee, &[cl_val, nl_val]);
+                            }
+                            other => {
+                                return Err(CodegenError::UnsupportedOperation(format!("print unsupported for type {:?}", other)));
+                            }
+                        }
+                        // Print returns Unit (produce dummy iconst for value registration)
+                        builder.ins().iconst(types::I32, 0)
                     }
                 };
 
@@ -323,6 +389,9 @@ pub fn compile_module(module: &Module) -> Result<Vec<u8>, CodegenError> {
                     if let Some(val) = opt_val {
                         let cl_val = *val_map.get(val).ok_or(CodegenError::UndefinedValue(*val))?;
                         builder.ins().return_(&[cl_val]);
+                    } else if func.name == "main" && func.return_type == Type::Unit {
+                        let zero = builder.ins().iconst(types::I32, 0);
+                        builder.ins().return_(&[zero]);
                     } else {
                         builder.ins().return_(&[]);
                     }

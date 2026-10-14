@@ -147,6 +147,9 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_block(&mut self, block: &syn::Block) -> Option<Value> {
+        let parent_keys: std::collections::HashSet<String> =
+            self.var_map.keys().cloned().collect();
+
         for stmt in &block.stmts {
             self.lower_stmt(stmt);
             if self.is_current_terminated() {
@@ -154,7 +157,7 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
 
-        if !self.is_current_terminated() {
+        let tail_val = if !self.is_current_terminated() {
             if let Some(ref tail_expr) = block.tail_expr {
                 Some(self.lower_expr(tail_expr))
             } else {
@@ -162,7 +165,12 @@ impl<'a> FunctionLowerer<'a> {
             }
         } else {
             None
-        }
+        };
+
+        // Clean up variables declared inside this block, preserving updates to outer variables
+        self.var_map.retain(|k, _| parent_keys.contains(k));
+
+        tail_val
     }
 
     fn lower_stmt(&mut self, stmt: &syn::Stmt) {

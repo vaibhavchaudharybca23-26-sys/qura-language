@@ -97,17 +97,55 @@ fn test_qir_canonical_factorial() {
     let module = lower_and_verify(src);
     assert_eq!(module.functions.len(), 2);
 
+    // 1. Structural assertions on @factorial
     let fact_fn = &module.functions[0];
     assert_eq!(fact_fn.name, "factorial");
-    // Two mutable variables ('result', 'i') tracked across loop header
+    assert_eq!(fact_fn.return_type, Type::I32);
+    assert_eq!(fact_fn.params.len(), 1); // (%0, i32)
+    assert_eq!(fact_fn.blocks.len(), 4); // entry, header, body, exit
+
+    // Block 0: entry block initializes result=1 and i=1, branches to header with [1, 1]
+    let entry = &fact_fn.blocks[0];
+    assert_eq!(entry.id, BlockId(0));
+    assert!(entry.params.is_empty());
+    assert!(matches!(entry.terminator, Terminator::Branch { target: BlockId(1), ref args } if args.len() == 2));
+
+    // Block 1: loop header takes [i, result] parameters
     let header = &fact_fn.blocks[1];
+    assert_eq!(header.id, BlockId(1));
     assert_eq!(header.params.len(), 2);
     assert_eq!(header.params[0].1, Type::I32);
     assert_eq!(header.params[1].1, Type::I32);
+    // Header evaluates `i <= n` and branches to body (Block 2) or exit (Block 3)
+    if let Terminator::CondBranch { then_block, else_block, else_args, .. } = &header.terminator {
+        assert_eq!(*then_block, BlockId(2));
+        assert_eq!(*else_block, BlockId(3));
+        assert_eq!(else_args.len(), 2);
+    } else {
+        panic!("expected cond_br at loop header");
+    }
 
+    // Block 2: body multiplies result * i, increments i, and branches back to header (Block 1)
+    let body = &fact_fn.blocks[2];
+    assert_eq!(body.id, BlockId(2));
+    assert!(matches!(body.terminator, Terminator::Branch { target: BlockId(1), ref args } if args.len() == 2));
+
+    // Block 3: exit block takes [i, result], returns result
+    let exit = &fact_fn.blocks[3];
+    assert_eq!(exit.id, BlockId(3));
+    assert_eq!(exit.params.len(), 2);
+    assert!(matches!(exit.terminator, Terminator::Return(Some(_))));
+
+    // 2. Structural assertions on @main
     let main_fn = &module.functions[1];
     assert_eq!(main_fn.name, "main");
     assert_eq!(main_fn.return_type, Type::I32);
+    assert_eq!(main_fn.blocks.len(), 1);
+    let main_entry = &main_fn.blocks[0];
+    assert!(main_entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Call { func, args } if func == "factorial" && args.len() == 1)
+    }));
+    assert!(matches!(main_entry.terminator, Terminator::Return(Some(_))));
 }
 
 #[test]
@@ -136,7 +174,64 @@ fn test_qir_canonical_collatz() {
 
     let collatz_fn = &module.functions[0];
     assert_eq!(collatz_fn.name, "collatz_steps");
-    // Verifier ran and established SSA correctness, valid CFG, and dominance!
+    assert_eq!(collatz_fn.return_type, Type::I32);
+    assert_eq!(collatz_fn.params.len(), 1);
+
+    // CFG contains: entry (0), loop_header (1), loop_body (2), if_then (3), if_else (4), if_merge (5), loop_exit (6)
+    assert_eq!(collatz_fn.blocks.len(), 7);
+
+    // Header tracks mut n and mut steps
+    let header = &collatz_fn.blocks[1];
+    assert_eq!(header.params.len(), 2);
+
+    // Main calls collatz_steps(27)
+    let main_fn = &module.functions[1];
+    assert_eq!(main_fn.name, "main");
+    let main_entry = &main_fn.blocks[0];
+    assert!(main_entry.instructions.iter().any(|(_, inst)| {
+        matches!(inst, Instruction::Call { func, args } if func == "collatz_steps" && args.len() == 1)
+    }));
+}
+
+#[test]
+fn test_qir_early_return_in_branches() {
+    let src = "
+    fn early_ret(x: i32) -> i32 {
+        if x > 100 {
+            return 1;
+        }
+        return 2;
+    }
+    ";
+    let module = lower_and_verify(src);
+    println!("{}", module);
+    let func = &module.functions[0];
+    assert_eq!(func.name, "early_ret");
+    // Entry has cond_br, then has return, else has branch to merge, merge has return
+    assert_eq!(func.blocks.len(), 4);
+}
+
+#[test]
+fn test_qir_loop_with_internal_mut_var() {
+    let src = "
+    fn two_loops() -> i32 {
+        let mut total = 0;
+        let mut i = 0;
+        while i < 5 {
+            let mut inner_var = i;
+            inner_var = inner_var + 10;
+            total = total + inner_var;
+            i = i + 1;
+        }
+        let mut j = 0;
+        while j < 5 {
+            j = j + 1;
+        }
+        return total;
+    }
+    ";
+    let module = lower_and_verify(src);
+    println!("{}", module);
 }
 
 // ============================================================================
@@ -284,4 +379,118 @@ fn test_verifier_rejects_non_boolean_condition() {
 
     let errs = verify_module(&module).expect_err("Expected error for non-bool cond_br");
     assert!(errs.iter().any(|e| e.message.contains("cond_br condition must be bool, found i32")));
+}
+
+#[test]
+fn test_verifier_rejects_unreachable_block() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "unreachable_block".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![
+            BasicBlock {
+                id: BlockId(0),
+                params: Vec::new(),
+                instructions: Vec::new(),
+                terminator: Terminator::Return(None),
+            },
+            BasicBlock {
+                id: BlockId(1), // Block 1 is unreachable!
+                params: Vec::new(),
+                instructions: Vec::new(),
+                terminator: Terminator::Return(None),
+            },
+        ],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for unreachable block");
+    assert!(errs.iter().any(|e| e.message.contains("is unreachable from entry")));
+}
+
+#[test]
+fn test_verifier_rejects_entry_block_parameters() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "entry_with_params".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: vec![(Value(0), Type::I32)], // Entry block cannot have block params!
+            instructions: Vec::new(),
+            terminator: Terminator::Return(None),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for entry block parameters");
+    assert!(errs.iter().any(|e| e.message.contains("entry block cannot have block parameters")));
+}
+
+#[test]
+fn test_verifier_rejects_branch_to_entry_block() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "loop_to_entry".to_string(),
+        params: Vec::new(),
+        return_type: Type::Unit,
+        blocks: vec![
+            BasicBlock {
+                id: BlockId(0),
+                params: Vec::new(),
+                instructions: Vec::new(),
+                terminator: Terminator::Branch {
+                    target: BlockId(1),
+                    args: Vec::new(),
+                },
+            },
+            BasicBlock {
+                id: BlockId(1),
+                params: Vec::new(),
+                instructions: Vec::new(),
+                terminator: Terminator::Branch {
+                    target: BlockId(0), // Cannot branch to entry block!
+                    args: Vec::new(),
+                },
+            },
+        ],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for branching to entry");
+    assert!(errs.iter().any(|e| e.message.contains("cannot branch to entry block")));
+}
+
+#[test]
+fn test_verifier_rejects_binary_operand_type_mismatch() {
+    let mut module = Module::new("test");
+    let func = Function {
+        name: "type_mismatch_inst".to_string(),
+        params: Vec::new(),
+        return_type: Type::I32,
+        blocks: vec![BasicBlock {
+            id: BlockId(0),
+            params: Vec::new(),
+            instructions: vec![
+                (Value(0), Instruction::ConstInt(10, Type::I32)),
+                (Value(1), Instruction::ConstBool(true)),
+                // Add %0 (i32) and %1 (bool) -> Mismatched operand types!
+                (
+                    Value(2),
+                    Instruction::Binary {
+                        op: qura_ir::BinaryOp::Add,
+                        lhs: Value(0),
+                        rhs: Value(1),
+                    },
+                ),
+            ],
+            terminator: Terminator::Return(Some(Value(0))),
+        }],
+    };
+    module.functions.push(func);
+
+    let errs = verify_module(&module).expect_err("Expected verifier error for mismatched binary operand types");
+    assert!(errs.iter().any(|e| e.message.contains("binary 'add' operand type mismatch")));
 }

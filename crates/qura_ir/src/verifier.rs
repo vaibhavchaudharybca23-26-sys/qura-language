@@ -63,6 +63,14 @@ impl<'a> Verifier<'a> {
 
         let entry_id = self.func.blocks[0].id;
 
+        if !self.func.blocks[0].params.is_empty() {
+            self.errors.push(QirVerificationError {
+                function: self.func.name.clone(),
+                block: Some(entry_id),
+                message: "entry block cannot have block parameters".to_string(),
+            });
+        }
+
         // 2. Register function parameters
         for (param_val, param_ty) in &self.func.params {
             if self
@@ -108,10 +116,51 @@ impl<'a> Verifier<'a> {
             }
         }
 
-        // 4. Compute Dominance Tree
+        // 4. Reachability Check
+        let mut reachable = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(entry_id);
+        reachable.insert(entry_id);
+
+        while let Some(curr) = queue.pop_front() {
+            if let Some(b) = self.block_map.get(&curr) {
+                match &b.terminator {
+                    Terminator::Return(_) => {}
+                    Terminator::Branch { target, .. } => {
+                        if reachable.insert(*target) {
+                            queue.push_back(*target);
+                        }
+                    }
+                    Terminator::CondBranch {
+                        then_block,
+                        else_block,
+                        ..
+                    } => {
+                        if reachable.insert(*then_block) {
+                            queue.push_back(*then_block);
+                        }
+                        if reachable.insert(*else_block) {
+                            queue.push_back(*else_block);
+                        }
+                    }
+                }
+            }
+        }
+
+        for block in &self.func.blocks {
+            if !reachable.contains(&block.id) {
+                self.errors.push(QirVerificationError {
+                    function: self.func.name.clone(),
+                    block: Some(block.id),
+                    message: format!("block {} is unreachable from entry", block.id),
+                });
+            }
+        }
+
+        // 5. Compute Dominance Tree
         self.compute_dominators(entry_id);
 
-        // 5. Verify Instructions and Uses
+        // 6. Verify Instructions and Uses
         for block in &self.func.blocks {
             for (idx, (def_val, inst)) in block.instructions.iter().enumerate() {
                 self.verify_instruction(block.id, idx + 1, *def_val, inst);
@@ -283,13 +332,39 @@ impl<'a> Verifier<'a> {
             | Instruction::ConstFloat(_)
             | Instruction::ConstBool(_) => {}
 
-            Instruction::Binary { lhs, rhs, .. } => {
+            Instruction::Binary { op, lhs, rhs } => {
                 self.check_dominance(*lhs, block_id, inst_idx);
                 self.check_dominance(*rhs, block_id, inst_idx);
+
+                if let (Some(l_ty), Some(r_ty)) = (self.value_types.get(lhs), self.value_types.get(rhs)) {
+                    if l_ty != r_ty {
+                        self.errors.push(QirVerificationError {
+                            function: self.func.name.clone(),
+                            block: Some(block_id),
+                            message: format!(
+                                "binary '{}' operand type mismatch: left is {}, right is {}",
+                                op.as_str(),
+                                l_ty,
+                                r_ty
+                            ),
+                        });
+                    }
+                }
             }
 
-            Instruction::Unary { val, .. } => {
+            Instruction::Unary { op, val } => {
                 self.check_dominance(*val, block_id, inst_idx);
+                if *op == UnaryOp::Not {
+                    if let Some(val_ty) = self.value_types.get(val) {
+                        if *val_ty != Type::Bool {
+                            self.errors.push(QirVerificationError {
+                                function: self.func.name.clone(),
+                                block: Some(block_id),
+                                message: format!("unary 'not' expects bool operand, found {}", val_ty),
+                            });
+                        }
+                    }
+                }
             }
 
             Instruction::Call { args, .. } => {
@@ -302,6 +377,7 @@ impl<'a> Verifier<'a> {
 
     fn verify_terminator(&mut self, block: &BasicBlock) {
         let term_idx = block.instructions.len() + 1;
+        let entry_id = self.func.blocks[0].id;
 
         match &block.terminator {
             Terminator::Return(opt_val) => {
@@ -332,6 +408,14 @@ impl<'a> Verifier<'a> {
             }
 
             Terminator::Branch { target, args } => {
+                if *target == entry_id {
+                    self.errors.push(QirVerificationError {
+                        function: self.func.name.clone(),
+                        block: Some(block.id),
+                        message: format!("cannot branch to entry block {}", entry_id),
+                    });
+                }
+
                 let target_block = match self.block_map.get(target) {
                     Some(b) => *b,
                     None => {
@@ -343,6 +427,11 @@ impl<'a> Verifier<'a> {
                         return;
                     }
                 };
+
+                // Check dominance for ALL arguments passed to branch
+                for arg in args {
+                    self.check_dominance(*arg, block.id, term_idx);
+                }
 
                 if args.len() != target_block.params.len() {
                     self.errors.push(QirVerificationError {
@@ -358,7 +447,6 @@ impl<'a> Verifier<'a> {
                 }
 
                 for (arg, (_, expected_ty)) in args.iter().zip(&target_block.params) {
-                    self.check_dominance(*arg, block.id, term_idx);
                     if let Some(actual_ty) = self.value_types.get(arg) {
                         if actual_ty != expected_ty {
                             self.errors.push(QirVerificationError {
@@ -381,6 +469,14 @@ impl<'a> Verifier<'a> {
                 else_block,
                 else_args,
             } => {
+                if *then_block == entry_id || *else_block == entry_id {
+                    self.errors.push(QirVerificationError {
+                        function: self.func.name.clone(),
+                        block: Some(block.id),
+                        message: format!("cannot branch to entry block {}", entry_id),
+                    });
+                }
+
                 self.check_dominance(*cond, block.id, term_idx);
 
                 if let Some(cond_ty) = self.value_types.get(cond) {
@@ -394,6 +490,14 @@ impl<'a> Verifier<'a> {
                             ),
                         });
                     }
+                }
+
+                // Check dominance for all arguments in both branches
+                for arg in then_args {
+                    self.check_dominance(*arg, block.id, term_idx);
+                }
+                for arg in else_args {
+                    self.check_dominance(*arg, block.id, term_idx);
                 }
 
                 // Verify then_block

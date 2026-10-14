@@ -9,6 +9,7 @@ pub enum Type {
     U64,
     F64,
     Bool,
+    Str,
     Unit,
     Error,
 }
@@ -23,6 +24,7 @@ impl Type {
                 "u64" => Ok(Type::U64),
                 "f64" => Ok(Type::F64),
                 "bool" => Ok(Type::Bool),
+                "str" => Ok(Type::Str),
                 other => Err(format!("unknown type '{}'", other)),
             },
             TypeExpr::Unit(_) => Ok(Type::Unit),
@@ -53,6 +55,19 @@ impl Type {
     }
 
     #[inline]
+    pub fn is_str(&self) -> bool {
+        matches!(self, Type::Str)
+    }
+
+    #[inline]
+    pub fn is_printable(&self) -> bool {
+        matches!(
+            self,
+            Type::Str | Type::I32 | Type::I64 | Type::U32 | Type::U64 | Type::Bool
+        )
+    }
+
+    #[inline]
     pub fn is_error(&self) -> bool {
         matches!(self, Type::Error)
     }
@@ -67,6 +82,7 @@ impl fmt::Display for Type {
             Type::U64 => write!(f, "u64"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::Str => write!(f, "str"),
             Type::Unit => write!(f, "()"),
             Type::Error => write!(f, "<error>"),
         }

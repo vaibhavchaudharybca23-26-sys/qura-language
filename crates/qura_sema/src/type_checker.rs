@@ -356,17 +356,7 @@ impl TypeChecker {
                 }
                 Literal::Float(_, _) => Type::F64,
                 Literal::Bool(_, _) => Type::Bool,
-                Literal::String(_, span) => {
-                    self.diagnostics.push(
-                        Diagnostic::error(
-                            "string literals are not yet supported in semantic analysis",
-                            *span,
-                        )
-                        .with_code("E0110")
-                        .with_label(DiagnosticLabel::primary(*span)),
-                    );
-                    Type::Error
-                }
+                Literal::String(_, _) => Type::Str,
             },
 
             Expr::Variable(ident) => match self.symbols.lookup_variable(&ident.name) {
@@ -444,6 +434,10 @@ impl TypeChecker {
                 let fn_sym = match self.symbols.lookup_function(&callee.name) {
                     Some(sym) => sym.clone(),
                     None => {
+                        if callee.name == "print" || callee.name == "println" {
+                            return self.check_builtin_print(&callee.name, args, *span);
+                        }
+
                         self.diagnostics.push(
                             Diagnostic::error(
                                 format!("cannot find function '{}' in this scope", callee.name),
@@ -755,4 +749,45 @@ impl TypeChecker {
             }
         }
     }
+
+    fn check_builtin_print(&mut self, name: &str, args: &[Expr], span: Span) -> Type {
+        if args.len() != 1 {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "function '{}' expects 1 argument(s), but {} were supplied",
+                        name,
+                        args.len()
+                    ),
+                    span,
+                )
+                .with_code("E0105")
+                .with_label(DiagnosticLabel::primary(span)),
+            );
+            return Type::Unit;
+        }
+
+        let arg = &args[0];
+        let arg_ty = self.check_expr(arg, None);
+        if arg_ty == Type::Error {
+            return Type::Unit;
+        }
+
+        if !arg_ty.is_printable() {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "cannot print value of type '{}': '{}' only accepts str, i32, i64, u32, u64, or bool",
+                        arg_ty, name
+                    ),
+                    arg.span(),
+                )
+                .with_code("E0109")
+                .with_label(DiagnosticLabel::primary(arg.span())),
+            );
+        }
+
+        Type::Unit
+    }
 }
+

@@ -36,6 +36,7 @@ impl From<qura_sema::Type> for Type {
             qura_sema::Type::F64 => Type::F64,
             qura_sema::Type::Bool => Type::Bool,
             qura_sema::Type::Unit => Type::Unit,
+            qura_sema::Type::Str => unimplemented!("QIR lowering for Type::Str is in Step 3"),
             qura_sema::Type::Error => panic!("cannot convert error type to QIR type"),
         }
     }

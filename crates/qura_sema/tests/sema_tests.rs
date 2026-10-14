@@ -395,3 +395,161 @@ fn test_negative_mismatched_binary_operands() {
         errs
     );
 }
+
+#[test]
+fn test_string_literal_type_inference_and_annotation() {
+    let src = "
+    fn test_strings() {
+        let a = \"hello\";
+        let b: str = \"world\\n\";
+        let mut c = \"mutable string\";
+        c = \"updated\";
+    }
+    ";
+    let _ = check_source(src).expect("String inference and annotations should pass");
+}
+
+#[test]
+fn test_builtin_print_and_println_all_supported_types() {
+    let src = "
+    fn main() {
+        print(\"hello\");
+        println(\"world\");
+        print(42);
+        println(100);
+        let a: i64 = 1000;
+        print(a);
+        let b: u32 = 200;
+        println(b);
+        let c: u64 = 300;
+        print(c);
+        let d: bool = true;
+        println(d);
+        println(false);
+    }
+    ";
+    let _ = check_source(src).expect("Builtin print and println should accept all printable types");
+}
+
+#[test]
+fn test_user_function_with_str_parameter_and_return() {
+    let src = "
+    fn echo(s: str) -> str {
+        return s;
+    }
+
+    fn main() {
+        let msg = echo(\"test\");
+        println(msg);
+    }
+    ";
+    let _ = check_source(src).expect("Functions with str params and returns should succeed");
+}
+
+#[test]
+fn test_negative_print_unsupported_type_f64() {
+    let src = "
+    fn main() {
+        println(3.14);
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for printing f64");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0109")),
+        "Expected E0109 (cannot print value of type f64), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_print_unsupported_type_unit() {
+    let src = "
+    fn noop() {}
+
+    fn main() {
+        print(noop());
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for printing ()");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0109")),
+        "Expected E0109 (cannot print value of type ()), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_print_zero_arguments() {
+    let src = "
+    fn main() {
+        println();
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for println with 0 arguments");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0105")),
+        "Expected E0105 (argument count mismatch), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_print_too_many_arguments() {
+    let src = "
+    fn main() {
+        print(\"a\", \"b\");
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for print with multiple arguments");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0105")),
+        "Expected E0105 (argument count mismatch), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_string_arithmetic() {
+    let src = "
+    fn main() {
+        let s = \"hello\" + \"world\";
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for string arithmetic");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0108")),
+        "Expected E0108 (invalid operator on non-numeric type), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_string_type_mismatch_let() {
+    let src = "
+    fn main() {
+        let s: str = 123;
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for assigning int to str");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0101")),
+        "Expected E0101 (type mismatch), found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_unknown_function_call_not_builtin() {
+    let src = "
+    fn main() {
+        foo_non_existent(\"hello\");
+    }
+    ";
+    let errs = check_source(src).expect_err("Expected error for unknown function");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0103")),
+        "Expected E0103 (unresolved function), found {:?}",
+        errs
+    );
+}
+

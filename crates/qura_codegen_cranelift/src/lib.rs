@@ -3,7 +3,7 @@ pub mod linker;
 pub mod runtime;
 
 pub use codegen::{compile_module, map_type, CodegenError};
-pub use linker::{find_msvc_linker, find_windows_sdk_lib, link_executable, LinkerError};
+pub use linker::{find_msvc_linker, find_native_linker, find_windows_sdk_lib, link_executable, LinkerError};
 
 use qura_ir::ir::Module;
 use std::path::Path;

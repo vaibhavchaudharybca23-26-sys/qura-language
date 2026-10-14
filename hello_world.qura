@@ -1,0 +1,6 @@
+fn main() -> i32 {
+    println("Hello from Qura Language!");
+    println(42);
+    println(true);
+    return 0;
+}

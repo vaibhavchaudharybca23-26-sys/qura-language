@@ -311,3 +311,22 @@ fn test_cli_run_print_hello_world() {
     assert_eq!(stdout, "Hello from Qura CLI!\r\n");
 }
 
+#[test]
+fn test_cli_doctor_command() {
+    let qura = get_qura_bin();
+
+    let output = Command::new(&qura)
+        .arg("doctor")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Qura Developer Environment Diagnostic"));
+    assert!(stdout.contains("Target Platform: Windows x86_64"));
+    assert!(stdout.contains("[OK] Native Linker:"));
+    assert!(stdout.contains("[OK] Windows SDK Library:"));
+    assert!(stdout.contains("Status: Environment ready"));
+}
+
+

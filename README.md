@@ -21,12 +21,22 @@ Qura is a statically typed, compiled programming language. The current compiler 
 
 To compile the Qura compiler and generate native executables on Windows:
 1. **Rust Toolchain:** Rust 1.87+ (MSVC target: `x86_64-pc-windows-msvc`).
-2. **Visual Studio C++ Build Tools:**
-   - Visual Studio 2022 or 2019 (Community, Professional, Enterprise, or standalone Build Tools).
-   - "Desktop development with C++" workload installed (provides `link.exe` and Windows 10/11 SDK libraries including `kernel32.lib`).
-3. *(Optional)* If your MSVC linker or SDK is in a custom path, configure environment variables:
-   - `QURA_LINKER`: Full path to `link.exe`.
-   - `QURA_SDK_LIB_DIR`: Directory containing `kernel32.lib` (e.g. `...\Windows Kits\10\Lib\10.0.22621.0\um\x64`).
+2. **Native Linker & Windows SDK:**
+   Qura features multi-strategy automatic discovery for host linkers and SDK libraries:
+   - **Visual Studio C++ Build Tools (Recommended):** Visual Studio 2022 or 2019 (Community, Pro, Enterprise, or standalone Build Tools). Can be installed in one command:
+     ```powershell
+     winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --add Microsoft.VisualStudio.Workload.VCTools"
+     ```
+   - **LLVM `lld-link`:** If LLVM is installed, Qura automatically discovers and uses `lld-link.exe`:
+     ```powershell
+     winget install LLVM.LLVM
+     ```
+   - **Automatic detection:** Qura queries `vswhere.exe`, Visual Studio Developer Environment (`LIB`), system `PATH`, and standard SDK locations.
+   - **Explicit overrides:** You can optionally configure environment variables:
+     - `QURA_LINKER`: Full path to `link.exe` or `lld-link.exe`.
+     - `QURA_SDK_LIB_DIR`: Directory containing `kernel32.lib` (e.g. `C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\x64`).
+
+Run `qura doctor` at any time to verify that your environment is ready to build native executables.
 
 ---
 
@@ -52,41 +62,59 @@ cargo test --workspace
 
 ## Using the Qura CLI
 
-### 1. `qura check <file.qura>`
+### 1. `qura doctor`
+Inspects the host environment, toolchain prerequisites, linker availability, and Windows SDK library paths:
+
+```powershell
+qura doctor
+```
+
+Output example:
+```text
+Qura Developer Environment Diagnostic
+=======================================
+[OK] Target Platform: Windows x86_64 (x86_64-pc-windows-msvc)
+[OK] Native Linker: C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\...\bin\Hostx64\x64\link.exe
+[OK] Windows SDK Library: C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64
+---------------------------------------
+Status: Environment ready. You can build and run native Qura programs!
+```
+
+### 2. `qura check <file.qura>`
 Verifies syntax and type correctness without generating native code:
 
 ```powershell
-qura check examples/hello_math.qura
+qura check examples/hello_world.qura
 ```
 
-### 2. `qura build <file.qura> [-o output.exe]`
+### 3. `qura build <file.qura> [-o output.exe]`
 Compiles source code into a standalone native Windows x86_64 executable:
 
 ```powershell
-# Default output name: hello_math.exe in current directory
-qura build examples/hello_math.qura
+# Default output name: hello_world.exe in current directory
+qura build examples/hello_world.qura
 
 # Explicit output name:
-qura build examples/hello_math.qura -o my_math.exe
+qura build examples/hello_world.qura -o my_app.exe
 ```
 
-### 3. `qura run <file.qura>`
-Compiles source code to a temporary binary, executes it immediately, and propagates the process exit code:
+### 4. `qura run <file.qura>`
+Compiles source code to a temporary binary, executes it immediately, streams stdout/stderr to the console, and propagates the process exit code:
 
 ```powershell
-qura run examples/factorial.qura
-Write-Host "Process Exit Code:" $LASTEXITCODE
+qura run examples/hello_world.qura
 ```
 
 ---
 
-## Language Features (v0.1.0)
+## Language Features (v0.1.0-alpha)
 
 ### Supported Types
 - **Signed Integers:** `i32`, `i64`
 - **Unsigned Integers:** `u32`, `u64`
 - **Floating-Point:** `f64`
 - **Boolean:** `bool` (`true`, `false`)
+- **Strings:** `str` (double-quoted string literals with escapes `\n`, `\r`, `\t`, `\\`, `\"`)
 - **Unit:** `()`
 
 ### Supported Syntax & Semantics
@@ -102,6 +130,12 @@ Write-Host "Process Exit Code:" $LASTEXITCODE
   let mut counter = 0; // Mutable
   counter = counter + 1;
   ```
+- **Console Output:** Built-in `print(val)` and `println(val)` supporting strings, integers, and booleans:
+  ```qura
+  print("Count: ");
+  println(42);
+  println(true);
+  ```
 - **Control Flow:**
   - `if` / `else` branching and expressions.
   - `while` loops with loop-carried mutable variables.
@@ -110,7 +144,7 @@ Write-Host "Process Exit Code:" $LASTEXITCODE
   - Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`.
   - Logic: `&&`, `||`, `!`.
 - **Inter-Function Calls:** Calling user-defined functions with type-checked arguments.
-- **Entry Point:** Program execution begins in `fn main() -> i32`, whose return value determines the native process exit code.
+- **Entry Point:** Program execution begins in `fn main() -> i32` or `fn main()`. When returning unit, the process exits with code 0. When returning `i32`, the return value determines the native process exit code.
 
 ---
 
@@ -118,16 +152,19 @@ Write-Host "Process Exit Code:" $LASTEXITCODE
 
 Sample programs are available in the [`examples/`](examples) directory:
 
-| File | Description | Expected Exit Code |
+| File | Description | Output / Exit Code |
 | :--- | :--- | :--- |
-| [`examples/hello_math.qura`](examples/hello_math.qura) | Arithmetic operations and function calling | `42` |
-| [`examples/factorial.qura`](examples/factorial.qura) | Iterative computation of `5!` using a `while` loop | `120` |
-| [`examples/collatz.qura`](examples/collatz.qura) | Collatz conjecture step counting for `n = 27` | `111` |
+| [`examples/hello_world.qura`](examples/hello_world.qura) | Hello world terminal output for strings, integers, and booleans | Prints output, exits with `0` |
+| [`examples/hello_math.qura`](examples/hello_math.qura) | Arithmetic operations and function calling | Exits with `42` |
+| [`examples/factorial.qura`](examples/factorial.qura) | Iterative computation of `5!` using a `while` loop | Exits with `120` |
+| [`examples/collatz.qura`](examples/collatz.qura) | Collatz conjecture step counting for `n = 27` | Exits with `111` |
 
 ---
 
-## Current Limitations
+## Current Limitations & Roadmap
 
-1. **Standard Output / I/O:** Standard library and standard I/O (e.g. `println!`) are not yet implemented. Programs currently communicate results to the operating system via `main` process exit codes.
-2. **Strings and Compound Data:** Strings, heap allocation, structures (`struct`), arrays, and enums are planned for subsequent milestones.
-3. **Linker Runtime:** Programs currently link against `kernel32.lib` with `/NODEFAULTLIB`. Full C runtime (`msvcrt`) integration will be introduced alongside standard library facilities.
+1. **Compound Types:** Structures (`struct`), enumerations (`enum`), and records are scheduled for Milestone 7.
+2. **Dynamic Memory & Collections:** Dynamic heap allocation, growable lists (`List<T>`), and key-value maps (`Map<K, V>`) are scheduled for Milestone 8.
+3. **C-ABI FFI:** User-defined `extern "C"` bindings to call external system DLLs (such as Win32 Sockets and SQLite) are scheduled for Milestone 9.
+4. **Multi-file Projects:** Multi-file compilation and the `import` system are scheduled for Milestone 10.
+

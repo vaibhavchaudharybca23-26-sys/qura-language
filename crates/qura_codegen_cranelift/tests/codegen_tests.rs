@@ -1,4 +1,6 @@
-use qura_codegen_cranelift::{compile_and_link, compile_module, link_executable};
+use qura_codegen_cranelift::{
+    compile_and_link, compile_module, find_native_linker, find_windows_sdk_lib, link_executable,
+};
 use qura_ir::{compile_and_verify, verify_module, Module};
 use qura_parser::parse_source;
 use qura_sema::analyze;
@@ -324,4 +326,18 @@ fn test_codegen_print_i64_min() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "-9223372036854775808\r\n");
 }
+
+#[test]
+fn test_linker_and_sdk_resolution() {
+    let linker = find_native_linker().expect("Native linker must be discovered");
+    assert!(linker.exists(), "Discovered linker must exist on disk");
+
+    let sdk_dir = find_windows_sdk_lib().expect("Windows SDK library directory must be discovered");
+    assert!(sdk_dir.exists(), "Discovered SDK dir must exist on disk");
+    assert!(
+        sdk_dir.join("kernel32.lib").exists(),
+        "kernel32.lib must exist in discovered SDK directory"
+    );
+}
+
 

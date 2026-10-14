@@ -1,4 +1,4 @@
-use qura_codegen_cranelift::compile_and_link;
+use qura_codegen_cranelift::{compile_and_link, find_native_linker, find_windows_sdk_lib};
 use qura_diagnostics::DiagnosticEmitter;
 use qura_ir::compile_and_verify;
 use qura_parser::parse_source;
@@ -148,6 +148,56 @@ impl Driver {
                 let _ = writeln!(err_writer, "error: failed to execute native binary: {}", e);
                 Err(1)
             }
+        }
+    }
+
+    /// Executes `qura doctor`:
+    /// Inspects the host environment, toolchain prerequisites, linker availability,
+    /// and Windows SDK library paths, providing clear guidance for developer onboarding.
+    pub fn doctor<W: Write>(out_writer: &mut W) -> Result<(), i32> {
+        let _ = writeln!(out_writer, "Qura Developer Environment Diagnostic");
+        let _ = writeln!(out_writer, "=======================================");
+
+        let target = "x86_64-pc-windows-msvc";
+        let _ = writeln!(out_writer, "[OK] Target Platform: Windows x86_64 ({})", target);
+
+        let mut all_ok = true;
+
+        // 1. Check Native Linker
+        match find_native_linker() {
+            Ok(linker_path) => {
+                let _ = writeln!(out_writer, "[OK] Native Linker: {}", linker_path.display());
+            }
+            Err(e) => {
+                all_ok = false;
+                let _ = writeln!(out_writer, "[FAILED] Native Linker:\n{}", e);
+            }
+        }
+
+        // 2. Check Windows SDK Libraries
+        match find_windows_sdk_lib() {
+            Ok(sdk_path) => {
+                let _ = writeln!(out_writer, "[OK] Windows SDK Library: {}", sdk_path.display());
+            }
+            Err(e) => {
+                all_ok = false;
+                let _ = writeln!(out_writer, "[FAILED] Windows SDK:\n{}", e);
+            }
+        }
+
+        let _ = writeln!(out_writer, "---------------------------------------");
+        if all_ok {
+            let _ = writeln!(
+                out_writer,
+                "Status: Environment ready. You can build and run native Qura programs!"
+            );
+            Ok(())
+        } else {
+            let _ = writeln!(
+                out_writer,
+                "Status: Missing prerequisites. Please install the required components above."
+            );
+            Err(1)
         }
     }
 

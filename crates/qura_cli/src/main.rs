@@ -17,6 +17,7 @@ COMMANDS:
     check <FILE>             Check syntax and types without code generation
     build <FILE> [-o <OUT>]  Compile source into a native Windows executable
     run   <FILE>             Compile, execute, and propagate process exit code
+    doctor                   Inspect host toolchain and linker prerequisites
     help                     Print this help message
     version                  Print version information
 
@@ -47,6 +48,13 @@ fn main() {
         "-V" | "--version" | "version" => {
             println!("qura v{}", VERSION);
             process::exit(0);
+        }
+        "doctor" => {
+            let mut stdout = io::stdout();
+            match Driver::doctor(&mut stdout) {
+                Ok(()) => process::exit(0),
+                Err(code) => process::exit(code),
+            }
         }
         "check" => {
             if args.len() < 3 {

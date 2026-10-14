@@ -298,6 +298,9 @@ impl<'a> FunctionLowerer<'a> {
                 syn::Literal::Int(v, _) => self.emit(Instruction::ConstInt(*v, Type::I32)),
                 syn::Literal::Float(v, _) => self.emit(Instruction::ConstFloat(*v)),
                 syn::Literal::Bool(v, _) => self.emit(Instruction::ConstBool(*v)),
+                syn::Literal::String(_, _) => {
+                    unimplemented!("string lowering in QIR is implemented in Step 3")
+                }
             },
 
             syn::Expr::Variable(ident) => {

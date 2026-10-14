@@ -171,12 +171,16 @@ pub enum Literal {
     Int(i64, Span),
     Float(f64, Span),
     Bool(bool, Span),
+    String(String, Span),
 }
 
 impl Literal {
     pub fn span(&self) -> Span {
         match self {
-            Literal::Int(_, span) | Literal::Float(_, span) | Literal::Bool(_, span) => *span,
+            Literal::Int(_, span)
+            | Literal::Float(_, span)
+            | Literal::Bool(_, span)
+            | Literal::String(_, span) => *span,
         }
     }
 }

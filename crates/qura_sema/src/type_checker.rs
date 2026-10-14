@@ -356,6 +356,17 @@ impl TypeChecker {
                 }
                 Literal::Float(_, _) => Type::F64,
                 Literal::Bool(_, _) => Type::Bool,
+                Literal::String(_, span) => {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "string literals are not yet supported in semantic analysis",
+                            *span,
+                        )
+                        .with_code("E0110")
+                        .with_label(DiagnosticLabel::primary(*span)),
+                    );
+                    Type::Error
+                }
             },
 
             Expr::Variable(ident) => match self.symbols.lookup_variable(&ident.name) {

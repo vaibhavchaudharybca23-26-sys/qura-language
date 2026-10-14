@@ -38,6 +38,7 @@ pub enum TokenKind {
     Ident(String),
     Int(i64),
     Float(f64),
+    String(String),
 
     // Arithmetic Operators
     Plus,       // +
@@ -100,6 +101,7 @@ impl TokenKind {
             TokenKind::Ident(_) => "identifier",
             TokenKind::Int(_) => "integer literal",
             TokenKind::Float(_) => "float literal",
+            TokenKind::String(_) => "string literal",
             TokenKind::Plus => "'+'",
             TokenKind::Minus => "'-'",
             TokenKind::Star => "'*'",
@@ -137,6 +139,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Ident(s) => write!(f, "{}", s),
             TokenKind::Int(v) => write!(f, "{}", v),
             TokenKind::Float(v) => write!(f, "{}", v),
+            TokenKind::String(s) => write!(f, "\"{}\"", s),
             TokenKind::Error(e) => write!(f, "Error({})", e),
             _ => write!(f, "{}", self.description()),
         }

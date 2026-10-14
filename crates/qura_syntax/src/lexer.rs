@@ -184,6 +184,9 @@ impl<'a> Lexer<'a> {
                 }
             }
 
+            // String literals
+            b'"' => self.lex_string(start),
+
             // Number literals
             b'0'..=b'9' => self.lex_number(start, byte),
 
@@ -195,6 +198,52 @@ impl<'a> Lexer<'a> {
 
         let end = self.cursor as u32;
         Token::new(kind, Span::new(start, end))
+    }
+
+    fn lex_string(&mut self, _start: u32) -> TokenKind {
+        let mut buf = String::new();
+
+        while let Some(b) = self.peek() {
+            match b {
+                b'"' => {
+                    self.bump();
+                    return TokenKind::String(buf);
+                }
+                b'\\' => {
+                    self.bump(); // consume '\\'
+                    match self.bump() {
+                        Some(b'n') => buf.push('\n'),
+                        Some(b'r') => buf.push('\r'),
+                        Some(b't') => buf.push('\t'),
+                        Some(b'\\') => buf.push('\\'),
+                        Some(b'"') => buf.push('"'),
+                        Some(other) => {
+                            return TokenKind::Error(format!(
+                                "invalid escape sequence '\\{}'",
+                                other as char
+                            ));
+                        }
+                        None => {
+                            return TokenKind::Error("unterminated string literal".to_string());
+                        }
+                    }
+                }
+                b'\r' | b'\n' => {
+                    return TokenKind::Error("unterminated string literal".to_string());
+                }
+                _ => {
+                    let remaining = &self.src[self.cursor..];
+                    if let Some(ch) = remaining.chars().next() {
+                        buf.push(ch);
+                        self.cursor += ch.len_utf8();
+                    } else {
+                        return TokenKind::Error("invalid character in string literal".to_string());
+                    }
+                }
+            }
+        }
+
+        TokenKind::Error("unterminated string literal".to_string())
     }
 
     fn lex_number(&mut self, start: u32, first_byte: u8) -> TokenKind {
@@ -355,4 +404,63 @@ mod tests {
         let tokens = lexer.tokenize_all();
         assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Error(_))));
     }
+
+    #[test]
+    fn test_lex_string_literals() {
+        // Empty string
+        let src_empty = "\"\"";
+        let mut lexer = Lexer::new(src_empty);
+        let tokens = lexer.tokenize_all();
+        assert_eq!(tokens[0].kind, TokenKind::String("".to_string()));
+        assert_eq!(tokens[0].span, Span::new(0, 2));
+
+        // Ordinary string with spaces and punctuation
+        let src_text = "\"Hello, World! 123 @#$ \"";
+        let mut lexer = Lexer::new(src_text);
+        let tokens = lexer.tokenize_all();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::String("Hello, World! 123 @#$ ".to_string())
+        );
+
+        // Escape sequences
+        let src_escapes = r#""line1\nline2\r\ttab\\quote\"""#;
+        let mut lexer = Lexer::new(src_escapes);
+        let tokens = lexer.tokenize_all();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::String("line1\nline2\r\ttab\\quote\"".to_string())
+        );
+
+        // Multiple strings in one input
+        let src_multi = "\"first\" \"second\" \"third\"";
+        let mut lexer = Lexer::new(src_multi);
+        let tokens = lexer.tokenize_all();
+        assert_eq!(tokens[0].kind, TokenKind::String("first".to_string()));
+        assert_eq!(tokens[1].kind, TokenKind::String("second".to_string()));
+        assert_eq!(tokens[2].kind, TokenKind::String("third".to_string()));
+        assert_eq!(tokens[3].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_lex_string_errors() {
+        // Unterminated string at EOF
+        let src_unterm = "\"unterminated string";
+        let mut lexer = Lexer::new(src_unterm);
+        let tokens = lexer.tokenize_all();
+        assert!(matches!(tokens[0].kind, TokenKind::Error(ref msg) if msg.contains("unterminated string literal")));
+
+        // Unterminated string at newline
+        let src_unterm_nl = "\"line without close\n";
+        let mut lexer = Lexer::new(src_unterm_nl);
+        let tokens = lexer.tokenize_all();
+        assert!(matches!(tokens[0].kind, TokenKind::Error(ref msg) if msg.contains("unterminated string literal")));
+
+        // Invalid escape sequence \q
+        let src_invalid_esc = r#""invalid \q escape""#;
+        let mut lexer = Lexer::new(src_invalid_esc);
+        let tokens = lexer.tokenize_all();
+        assert!(matches!(tokens[0].kind, TokenKind::Error(ref msg) if msg.contains("invalid escape sequence '\\q'")));
+    }
 }
+

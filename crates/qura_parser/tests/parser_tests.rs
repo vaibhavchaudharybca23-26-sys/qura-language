@@ -337,3 +337,101 @@ fn test_negative_unterminated_block_comment() {
         errs
     );
 }
+
+#[test]
+fn test_parse_string_literals() {
+    let src = r#"
+    fn main() -> i32 {
+        let empty = "";
+        let greeting = "Hello, World!";
+        let escaped = "line1\nline2\r\ttab\\quote\"";
+        let punctuation = "Spaces & Punctuation: [!@#$%^&*()]";
+        println(greeting);
+        println("Direct argument string");
+        return 0;
+    }
+    "#;
+    let program = parse_source(src).expect("Failed to parse program with string literals");
+    assert_eq!(program.items.len(), 1);
+    let Item::Function(func) = &program.items[0];
+    assert_eq!(func.name.name, "main");
+    // Verify AST contains Literal::String with correct contents
+    let stmts = &func.body.stmts;
+    assert_eq!(stmts.len(), 7); // 4 lets, 2 expr calls, 1 return
+
+    match &stmts[0] {
+        Stmt::Let { init: Expr::Literal(Literal::String(s, _)), .. } => {
+            assert_eq!(s, "");
+        }
+        other => panic!("Expected empty string literal, found {:?}", other),
+    }
+
+    match &stmts[1] {
+        Stmt::Let { init: Expr::Literal(Literal::String(s, _)), .. } => {
+            assert_eq!(s, "Hello, World!");
+        }
+        other => panic!("Expected greeting string literal, found {:?}", other),
+    }
+
+    match &stmts[2] {
+        Stmt::Let { init: Expr::Literal(Literal::String(s, _)), .. } => {
+            assert_eq!(s, "line1\nline2\r\ttab\\quote\"");
+        }
+        other => panic!("Expected escaped string literal, found {:?}", other),
+    }
+
+    match &stmts[4] {
+        Stmt::Expr { expr: Expr::Call { callee, args, .. }, .. } => {
+            assert_eq!(callee.name, "println");
+            assert_eq!(args.len(), 1);
+        }
+        other => panic!("Expected call statement, found {:?}", other),
+    }
+
+    match &stmts[5] {
+        Stmt::Expr { expr: Expr::Call { callee, args, .. }, .. } => {
+            assert_eq!(callee.name, "println");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Literal(Literal::String(s, _)) => {
+                    assert_eq!(s, "Direct argument string");
+                }
+                other => panic!("Expected string literal arg, found {:?}", other),
+            }
+        }
+        other => panic!("Expected call statement with string literal, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_negative_unterminated_string_literal() {
+    let src = r#"
+    fn main() -> i32 {
+        let msg = "unterminated string;
+        return 0;
+    }
+    "#;
+    let errs = parse_source(src).expect_err("Expected error for unterminated string");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0001") && d.message.contains("unterminated string literal")),
+        "Expected E0001 unterminated string literal, found {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_negative_invalid_string_escape() {
+    let src = r#"
+    fn main() -> i32 {
+        let msg = "invalid \q escape";
+        return 0;
+    }
+    "#;
+    let errs = parse_source(src).expect_err("Expected error for invalid escape");
+    assert!(
+        errs.iter().any(|d| d.code == Some("E0001") && d.message.contains("invalid escape sequence '\\q'")),
+        "Expected E0001 invalid escape sequence, found {:?}",
+        errs
+    );
+}
+

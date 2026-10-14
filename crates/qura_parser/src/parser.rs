@@ -535,6 +535,10 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Ok(Expr::Literal(Literal::Bool(false, tok.span)))
             }
+            TokenKind::String(ref s) => {
+                self.bump();
+                Ok(Expr::Literal(Literal::String(s.clone(), tok.span)))
+            }
             TokenKind::Ident(ref name) => {
                 self.bump();
                 Ok(Expr::Variable(Ident::new(name, tok.span)))

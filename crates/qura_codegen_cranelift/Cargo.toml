@@ -1,0 +1,20 @@
+[package]
+name = "qura_codegen_cranelift"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+qura_ir = { path = "../qura_ir" }
+qura_syntax = { path = "../qura_syntax" }
+
+cranelift-codegen = "0.124.3"
+cranelift-frontend = "0.124.3"
+cranelift-module = "0.124.3"
+cranelift-object = "0.124.3"
+target-lexicon = "0.13"
+
+[dev-dependencies]
+qura_parser = { path = "../qura_parser" }
+qura_sema = { path = "../qura_sema" }

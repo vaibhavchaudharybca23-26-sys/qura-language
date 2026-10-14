@@ -12,3 +12,7 @@ Cargo.lock
 # OS files
 Thumbs.db
 [Dd]esktop.ini
+
+# Packaging & distribution
+dist/
+*.vsix

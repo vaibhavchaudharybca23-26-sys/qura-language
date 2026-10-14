@@ -340,4 +340,105 @@ fn test_linker_and_sdk_resolution() {
     );
 }
 
+#[test]
+fn test_codegen_user_function_str_parameter_and_return() {
+    let src = "
+    fn greet(prefix: str, name: str) -> str {
+        print(prefix);
+        println(name);
+        return name;
+    }
+
+    fn main() -> i32 {
+        let returned: str = greet(\"Hello, \", \"Developer\");
+        println(returned);
+        return 0;
+    }
+    ";
+    let (code, stdout) = compile_to_exe_and_run_with_output(src, "user_function_str");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Hello, Developer\r\nDeveloper\r\n");
+}
+
+#[test]
+fn test_codegen_boolean_equality() {
+    let src = "
+    fn main() -> i32 {
+        let a: bool = true;
+        let b: bool = false;
+        let is_eq = a == b;
+        let is_ne = a != b;
+        let same = a == true;
+        if is_ne && !is_eq && same {
+            return 42;
+        }
+        return 0;
+    }
+    ";
+    let exit_code = compile_to_exe_and_run(src, "boolean_equality");
+    assert_eq!(exit_code, 42);
+}
+
+#[test]
+fn test_codegen_while_with_complex_condition() {
+    let src = "
+    fn main() -> i32 {
+        let mut i = 0;
+        let mut keep_going = true;
+        while keep_going && i < 10 {
+            i = i + 1;
+            if i == 7 {
+                keep_going = false;
+            }
+        }
+        return i;
+    }
+    ";
+    let exit_code = compile_to_exe_and_run(src, "while_complex");
+    assert_eq!(exit_code, 7);
+}
+
+#[test]
+fn test_codegen_block_expression() {
+    let src = "
+    fn main() -> i32 {
+        let val = {
+            let x = 15;
+            let y = 25;
+            x + y
+        };
+        return val; // 40
+    }
+    ";
+    let exit_code = compile_to_exe_and_run(src, "block_expression");
+    assert_eq!(exit_code, 40);
+}
+
+#[test]
+fn test_codegen_else_if_ladder() {
+    let src = "
+    fn grade(score: i32) -> i32 {
+        if score >= 90 {
+            1
+        } else if score >= 80 {
+            2
+        } else if score >= 70 {
+            3
+        } else {
+            4
+        }
+    }
+
+    fn main() -> i32 {
+        let g1 = grade(95); // 1
+        let g2 = grade(85); // 2
+        let g3 = grade(75); // 3
+        let g4 = grade(50); // 4
+        return g1 * 1000 + g2 * 100 + g3 * 10 + g4; // 1234
+    }
+    ";
+    let exit_code = compile_to_exe_and_run(src, "else_if_ladder");
+    assert_eq!(exit_code, 1234);
+}
+
 

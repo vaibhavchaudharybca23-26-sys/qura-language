@@ -1,0 +1,45 @@
+{
+  "name": "qura-lang",
+  "displayName": "Qura Language",
+  "description": "Syntax highlighting and language support for Qura Language (.qura)",
+  "version": "0.1.0",
+  "publisher": "qura-lang",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qura-lang/qura"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "qura",
+    "programming language",
+    "syntax highlighting"
+  ],
+  "license": "Apache-2.0",
+  "contributes": {
+    "languages": [
+      {
+        "id": "qura",
+        "aliases": [
+          "Qura",
+          "qura"
+        ],
+        "extensions": [
+          ".qura"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qura",
+        "scopeName": "source.qura",
+        "path": "./syntaxes/qura.tmLanguage.json"
+      }
+    ]
+  }
+}

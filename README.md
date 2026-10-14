@@ -13,7 +13,10 @@ Qura is a statically typed, compiled programming language. The current compiler 
 - Two-pass lexical scope resolver and type checker (`qura_sema`).
 - Backend-independent Static Single Assignment (SSA) intermediate representation with dominance verification (`qura_ir`).
 - Native Windows x86_64 code generation powered by Cranelift (`qura_codegen_cranelift`).
-- Developer-facing CLI (`qura_cli`) providing `check`, `build`, and `run` commands.
+- Developer-facing CLI (`qura_cli`) providing `check`, `build`, `run`, and `doctor` commands.
+- Official Visual Studio Code extension with full syntax highlighting (`editors/vscode`).
+
+> For a complete step-by-step walkthrough of installation, editor setup, and building your first program, see the [**Developer Quickstart Guide**](docs/QUICKSTART.md).
 
 ---
 
@@ -158,6 +161,39 @@ Sample programs are available in the [`examples/`](examples) directory:
 | [`examples/hello_math.qura`](examples/hello_math.qura) | Arithmetic operations and function calling | Exits with `42` |
 | [`examples/factorial.qura`](examples/factorial.qura) | Iterative computation of `5!` using a `while` loop | Exits with `120` |
 | [`examples/collatz.qura`](examples/collatz.qura) | Collatz conjecture step counting for `n = 27` | Exits with `111` |
+
+---
+
+## Editor Support: VS Code Extension
+
+An official Visual Studio Code extension is provided in [`editors/vscode/`](editors/vscode):
+- Provides syntax highlighting for `.qura` files (keywords, types, string escapes, numbers, comments, builtins).
+- Configures bracket pairs, quote auto-closing, and block comment toggling.
+
+### Quick Install
+```powershell
+# Copy extension folder directly into VS Code extensions directory:
+Copy-Item -Recurse "editors/vscode" "$HOME/.vscode/extensions/qura-lang"
+
+# Or install the packaged VSIX:
+code --install-extension editors/vscode/qura-lang-0.1.0.vsix
+```
+
+---
+
+## Release Packaging
+
+To build and package a reproducible Windows x64 release archive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1 -Version "v0.1.0-alpha"
+```
+
+The script outputs `dist/qura-v0.1.0-alpha-windows-x64.zip` containing:
+- `bin/qura.exe` (optimized release binary)
+- `examples/*.qura`
+- `editors/vscode` extension files and `.vsix`
+- `README.md`, `LICENSE`, and `QUICKSTART.md`
 
 ---
 
